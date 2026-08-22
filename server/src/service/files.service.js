@@ -2,44 +2,61 @@ import fs from "fs";
 import path from "path";
 import busboy from "busboy";
 import { pipeline } from "stream/promises";
+import { Transform } from "stream";
+import * as filesRepo from "../repositories/files.repository.js";
 
 export const uploadFile = async (req) => {
+  const bb = busboy({
+    headers: req.headers,
+  });
 
-    const destinationPath = path.join(
-        process.cwd(),
-        "storage",
-        "temp",
-        "upload.tmp"
-    );
+  return new Promise((resolve, reject) => {
+    req.pipe(bb);
 
-    const bb = busboy({
-        headers: req.headers
-    });
+    bb.on("file", async (fieldName, fileStream, info) => {
+      try {
+        const fileName = info.filename;
+        const mimeType = info.mimeType;
 
-    return new Promise((resolve, reject) => {
+        const upload = await filesRepo.uploadFile(fileName, mimeType);
 
-        req.pipe(bb);
+        const destinationPath = path.join(
+          process.cwd(),
+          "storage",
+          "temp",
+          `${upload.id}.tmp`,
+        );
 
-        bb.on("file", async (fieldName, fileStream, info) => {
+        let size = 0;
 
-            try {
-                const writeStream =
-                    fs.createWriteStream(destinationPath);
-
-                await pipeline(fileStream, writeStream);
-
-                resolve({
-                    success: true,
-                    path: destinationPath
-                });
-
-            } catch (error) {
-                reject(error);
-            }
+        const counter = new Transform({
+          transform(chunk, encoding, callback) {
+            size += chunk.length;
+            callback(null, chunk);
+          },
         });
 
-        bb.on("error", (error) => {
-            reject(error);
+        await pipeline(
+          fileStream,
+          counter,
+          fs.createWriteStream(destinationPath),
+        );
+
+        await filesRepo.completeUpload(upload.id, destinationPath, size);
+
+
+        resolve({
+          success: true,
+          path: destinationPath,
+          size: size
         });
+      } catch (error) {
+        reject(error);
+      }
     });
+
+    bb.on("error", (error) => {
+      reject(error);
+    });
+  });
 };
