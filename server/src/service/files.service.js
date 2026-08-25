@@ -11,6 +11,14 @@ export const uploadFile = async (req) => {
   });
 
   return new Promise((resolve, reject) => {
+
+    let expectedSize = null;
+    bb.on("field", (fieldName, value) => {
+      if (fieldName === "expectedSize") {
+        expectedSize = parseInt(value, 10);
+      }
+    });
+
     req.pipe(bb);
 
     bb.on("file", async (fieldName, fileStream, info) => {
@@ -18,7 +26,7 @@ export const uploadFile = async (req) => {
         const fileName = info.filename;
         const mimeType = info.mimeType;
 
-        const upload = await filesRepo.uploadFile(fileName, mimeType);
+        const upload = await filesRepo.uploadFile(fileName, mimeType, expectedSize);
 
         const destinationPath = path.join(
           process.cwd(),
@@ -32,6 +40,7 @@ export const uploadFile = async (req) => {
         const counter = new Transform({
           transform(chunk, encoding, callback) {
             size += chunk.length;
+            console.log(`Received ${size} bytes for file ${fileName}`);
             callback(null, chunk);
           },
         });

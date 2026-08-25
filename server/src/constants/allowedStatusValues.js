@@ -1,2 +1,2 @@
-const statusValues = ['pending', 'in_progress', 'completed'];
+const statusValues = ['in_progress', 'completed', 'failed', 'storage_missing'];
 export default statusValues;
