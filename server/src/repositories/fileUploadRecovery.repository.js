@@ -5,7 +5,7 @@ export const getUnfinishedFiles = async () => {
         `
             SELECT * FROM uploads
             WHERE status = 'in_progress'
-                AND updated_at < NOW() - INTERVAL '15 minutes';
+                AND updated_at < NOW() - INTERVAL '1 minutes';
         `,
     );
     return result.rows;

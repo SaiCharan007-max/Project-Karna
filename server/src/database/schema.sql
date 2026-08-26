@@ -5,7 +5,9 @@ CREATE TABLE uploads (
     mime_type TEXT,
 
     expected_size BIGINT,
+    expected_hash TEXT,
     total_size BIGINT,
+    actual_hash TEXT,
 
     storage_path TEXT,
 
