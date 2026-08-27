@@ -12,7 +12,7 @@ const initialiseFileUploadSchedulers = async () => {
     await fileUploadUnfinishedRecoveryQueue.upsertJobScheduler(
       "pending-upload-recovery",
       {
-        every: 5 * 1000,
+        every: 15 * 60 * 1000,
       },
       {
         name: "reconcile-pending",
@@ -30,7 +30,7 @@ const initialiseFileUploadSchedulers = async () => {
     await fileUploadCompletedRecoveryQueue.upsertJobScheduler(
       "completed-upload-audit",
       {
-        every: 60 * 1000,
+        every: 60 * 60 * 1000,
       },
       {
         name: "reconcile-completed",

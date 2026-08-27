@@ -31,27 +31,46 @@ export const uploadFile = async (req) => {
         const fileName = info.filename;
         const mimeType = info.mimeType;
         const hash = crypto.createHash("sha256");
+        const idempotencyKey = req.headers["idempotency-key"];
+
+        if (!idempotencyKey) {
+          throw new Error("Idempotency key is required");
+        }
 
         if (expectedSize === null || expectedHash === null) {
           throw new Error("expectedSize and expectedHash are required");
         }
-
-        console.log(expectedSize);
-        console.log(expectedHash);
 
         expectedHash = expectedHash.trim().toLowerCase();
 
         if (!Number.isSafeInteger(expectedSize) || expectedSize < 0) {
           throw new Error("Invalid expectedSize");
         }
-        
+
         const upload = await filesRepo.uploadFile(
           fileName,
           mimeType,
           expectedSize,
           expectedHash,
+          idempotencyKey,
         );
 
+        if (!upload) {
+          const existingUpload = await filesRepo.checkExistence(idempotencyKey);
+
+          if (!existingUpload) {
+            throw new Error(
+              "Upload conflict occurred but existing upload was not found",
+            );
+          }
+
+          resolve({
+            id: existingUpload.id,
+            status: existingUpload.status,
+          });
+
+          return;
+        }
 
         const destinationPath = path.join(
           process.cwd(),
