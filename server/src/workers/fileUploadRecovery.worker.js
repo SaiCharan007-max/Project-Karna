@@ -14,10 +14,6 @@ export const reconcileUploadsPending = async () => {
   const uploadsToReconcile =
     await filesRecoveryRepo.getUnfinishedFiles();
 
-  console.log(
-    `Pending recovery: found ${uploadsToReconcile.length} uploads`
-  );
-
   for (const upload of uploadsToReconcile) {
     const {
       id,
@@ -108,10 +104,6 @@ export const reconcileUploadsPending = async () => {
 export const reconcileUploadsCompleted = async () => {
   const uploadsToReconcile =
     await filesRecoveryRepo.getCompletedFiles();
-
-  console.log(
-    `Completed audit: found ${uploadsToReconcile.length} uploads`
-  );
 
   for (const upload of uploadsToReconcile) {
     const {

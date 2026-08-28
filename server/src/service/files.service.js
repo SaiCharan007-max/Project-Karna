@@ -85,7 +85,6 @@ export const uploadFile = async (req) => {
           transform(chunk, encoding, callback) {
             size += chunk.length;
             hash.update(chunk);
-            console.log(`Received ${size} bytes for file ${fileName}`);
             callback(null, chunk);
           },
         });

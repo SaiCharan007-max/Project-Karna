@@ -4,10 +4,6 @@ import {
 } from "../queues/fileUploadRecovery.queue.js";
 
 const initialiseFileUploadSchedulers = async () => {
-  console.log("Starting file upload schedulers...");
-
-  console.log("Creating pending scheduler...");
-
   const pendingScheduler =
     await fileUploadUnfinishedRecoveryQueue.upsertJobScheduler(
       "pending-upload-recovery",
@@ -19,13 +15,6 @@ const initialiseFileUploadSchedulers = async () => {
       },
     );
 
-  console.log(
-    "Pending scheduler created:",
-    pendingScheduler?.id
-  );
-
-  console.log("Creating completed scheduler...");
-
   const completedScheduler =
     await fileUploadCompletedRecoveryQueue.upsertJobScheduler(
       "completed-upload-audit",
@@ -36,11 +25,6 @@ const initialiseFileUploadSchedulers = async () => {
         name: "reconcile-completed",
       },
     );
-
-  console.log(
-    "Completed scheduler created:",
-    completedScheduler?.id
-  );
 
   console.log("File upload schedulers initialized");
 };
