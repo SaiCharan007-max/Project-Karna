@@ -11,18 +11,11 @@ export const uploadFile = async (req) => {
     headers: req.headers,
   });
 
-  return new Promise((resolve, reject) => {
-    let expectedSize = null;
-    let expectedHash = null;
+  const idempotencyKey = req.headers["idempotency-key"];
+  const expectedSize = req.headers["expected-size"] ? parseInt(req.headers["expected-size"], 10) : null;
+  const expectedHash = req.headers["expected-hash"] ? req.headers["expected-hash"].trim().toLowerCase() : null;
 
-    bb.on("field", (fieldName, value) => {
-      if (fieldName === "expectedSize") {
-        expectedSize = parseInt(value, 10);
-      }
-      if (fieldName === "expectedHash") {
-        expectedHash = value;
-      }
-    });
+  return new Promise((resolve, reject) => {
 
     req.pipe(bb);
 
@@ -31,7 +24,6 @@ export const uploadFile = async (req) => {
         const fileName = info.filename;
         const mimeType = info.mimeType;
         const hash = crypto.createHash("sha256");
-        const idempotencyKey = req.headers["idempotency-key"];
 
         if (!idempotencyKey) {
           throw new Error("Idempotency key is required");
@@ -41,7 +33,6 @@ export const uploadFile = async (req) => {
           throw new Error("expectedSize and expectedHash are required");
         }
 
-        expectedHash = expectedHash.trim().toLowerCase();
 
         if (!Number.isSafeInteger(expectedSize) || expectedSize < 0) {
           throw new Error("Invalid expectedSize");
