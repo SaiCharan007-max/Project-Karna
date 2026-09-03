@@ -1,14 +1,14 @@
   import pool from "../config/db.js";
 
-  export const uploadFile = async (fileName, mimeType, expectedSize, expectedHash, idempotencyKey) => {
+  export const uploadFile = async (fileName, mimeType, expectedSize, expectedHash, idempotencyKey, extension) => {
     const result = await pool.query(
       `
-        INSERT INTO uploads(original_name, mime_type, expected_size, expected_hash, status, idempotency_key)
-        VALUES($1, $2, $3, $4, 'in_progress', $5)
+        INSERT INTO uploads(original_name, mime_type, expected_size, expected_hash, status, idempotency_key, extension)
+        VALUES($1, $2, $3, $4, 'in_progress', $5, $6)
         ON CONFLICT (idempotency_key) DO NOTHING
         RETURNING id, original_name, mime_type, expected_size, expected_hash, status
       `,
-      [fileName, mimeType, expectedSize, expectedHash, idempotencyKey],
+      [fileName, mimeType, expectedSize, expectedHash, idempotencyKey, extension],
     );
     return result.rows[0] || null;
   };

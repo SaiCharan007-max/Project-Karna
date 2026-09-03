@@ -19,3 +19,7 @@ CREATE TABLE uploads (
 
 ALTER TABLE uploads
 ADD COLUMN idempotency_key UUID NOT NULL UNIQUE;
+
+ALTER TABLE uploads
+ADD COLUMN extension VARCHAR(20);
+

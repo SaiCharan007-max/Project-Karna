@@ -4,6 +4,7 @@ import busboy from "busboy";
 import { pipeline } from "stream/promises";
 import { Transform } from "stream";
 import crypto from "crypto";
+import { setTimeout } from "timers/promises";
 import * as filesRepo from "../repositories/files.repository.js";
 
 export const uploadFile = async (req) => {
@@ -12,11 +13,14 @@ export const uploadFile = async (req) => {
   });
 
   const idempotencyKey = req.headers["idempotency-key"];
-  const expectedSize = req.headers["expected-size"] ? parseInt(req.headers["expected-size"], 10) : null;
-  const expectedHash = req.headers["expected-hash"] ? req.headers["expected-hash"].trim().toLowerCase() : null;
+  const expectedSize = req.headers["expected-size"]
+    ? parseInt(req.headers["expected-size"], 10)
+    : null;
+  const expectedHash = req.headers["expected-hash"]
+    ? req.headers["expected-hash"].trim().toLowerCase()
+    : null;
 
   return new Promise((resolve, reject) => {
-
     req.pipe(bb);
 
     bb.on("file", async (fieldName, fileStream, info) => {
@@ -24,6 +28,7 @@ export const uploadFile = async (req) => {
         const fileName = info.filename;
         const mimeType = info.mimeType;
         const hash = crypto.createHash("sha256");
+        const extension = path.extname(fileName).toLowerCase(); // Get the file extension without the dot
 
         if (!idempotencyKey) {
           throw new Error("Idempotency key is required");
@@ -32,7 +37,6 @@ export const uploadFile = async (req) => {
         if (expectedSize === null || expectedHash === null) {
           throw new Error("expectedSize and expectedHash are required");
         }
-
 
         if (!Number.isSafeInteger(expectedSize) || expectedSize < 0) {
           throw new Error("Invalid expectedSize");
@@ -44,6 +48,7 @@ export const uploadFile = async (req) => {
           expectedSize,
           expectedHash,
           idempotencyKey,
+          extension,
         );
 
         if (!upload) {
@@ -95,17 +100,31 @@ export const uploadFile = async (req) => {
 
           throw new Error("File verification failed");
         }
+        
+
+        await fs.promises.rename(
+          `storage/temp/${upload.id}.tmp`,
+          `storage/finished/${upload.id}.${extension}`,
+        );
+
+        const finalPath = path.join(
+          process.cwd(),
+          "storage",
+          "finished",
+          `${upload.id}.${extension}`,
+        );
+
 
         await filesRepo.completeUpload(
           upload.id,
-          destinationPath,
+          finalPath,
           size,
           actualHash,
         );
 
         resolve({
           success: true,
-          path: destinationPath,
+          path: finalPath,
           size: size,
         });
       } catch (error) {
