@@ -1,4 +1,6 @@
-import fs from "fs/promises";
+import fs from "fs";
+import fsp from "fs/promises";
+
 import path from "path";
 import crypto from "crypto";
 
@@ -14,6 +16,15 @@ const getTempFilePath = (id) => {
   );
 };
 
+const getFinalFilePath = (id, extension) => {
+  return path.join(
+    process.cwd(),
+    "storage",
+    "finished",
+    `${id}${extension}`,
+  );
+};
+
 const calculateFileHash = async (filePath) => {
   const hash = crypto.createHash("sha256");
 
@@ -22,6 +33,26 @@ const calculateFileHash = async (filePath) => {
   }
 
   return hash.digest("hex");
+};
+
+const verifyFile = async (
+  filePath,
+  expectedSize,
+  expectedHash,
+) => {
+  const stats = await fsp.stat(filePath);
+
+  const calculatedHash = await calculateFileHash(filePath);
+
+  const isValid =
+    calculatedHash === expectedHash &&
+    stats.size === expectedSize;
+
+  return {
+    isValid,
+    size: stats.size,
+    hash: calculatedHash,
+  };
 };
 
 export const reconcileUploadsPending = async () => {
@@ -34,45 +65,125 @@ export const reconcileUploadsPending = async () => {
       expected_size,
       expected_hash,
       storage_path,
+      extension,
     } = upload;
 
-    // If storage_path was never written to the DB,
-    // the upload may have crashed before completeUpload().
-    // Since temp files are named using the upload ID,
-    // we can deterministically find the file.
-    const filePath = storage_path || getTempFilePath(id);
+    const tempPath = getTempFilePath(id);
+    const finalPath = getFinalFilePath(id, extension);
 
-    try {
-      const stats = await fs.stat(filePath);
+    let filePath = null;
+    let isTempFile = false;
 
-      const calculatedHash = await calculateFileHash(filePath);
-
-      const isValid =
-        calculatedHash === expected_hash &&
-        stats.size === expected_size;
-
-      if (!isValid) {
-        await fs.unlink(filePath);
-        await filesRepo.updateStatus(id, "failed");
-        continue;
+    /*
+     * If the database already contains a storage path,
+     * try that path first.
+     *
+     * This represents the normal recovery case where
+     * the path was written to the database before the
+     * process was interrupted.
+     */
+    
+    if (storage_path) {
+      try {
+        await fsp.stat(storage_path);
+        filePath = storage_path;
+      } catch (error) {
+        if (error.code !== "ENOENT") {
+          throw error;
+        }
       }
-
-      // The file is valid, so recover the interrupted upload.
-      await filesRepo.completeUpload(
-        id,
-        filePath,
-        stats.size,
-        calculatedHash,
-      );
-    } catch (error) {
-      if (error.code === "ENOENT") {
-        // Neither the DB path nor the expected temp file exists.
-        await filesRepo.updateStatus(id, "failed");
-        continue;
-      }
-
-      throw error;
     }
+
+    /*
+     * If the database path was unavailable, check the
+     * deterministic final path.
+     *
+     * This handles the crash window:
+     *
+     * rename(temp, final)
+     *        ↓
+     * process crashes
+     *        ↓
+     * completeUpload() never executes
+     */
+    if (!filePath) {
+      try {
+        await fsp.stat(finalPath);
+        filePath = finalPath;
+      } catch (error) {
+        if (error.code !== "ENOENT") {
+          throw error;
+        }
+      }
+    }
+
+    /*
+     * If the final file doesn't exist, check the temp file.
+     */
+    if (!filePath) {
+      try {
+        await fsp.stat(tempPath);
+        filePath = tempPath;
+        isTempFile = true;
+      } catch (error) {
+        if (error.code !== "ENOENT") {
+          throw error;
+        }
+      }
+    }
+
+    /*
+     * Neither the final file nor the temp file exists.
+     * There is nothing that can be recovered.
+     */
+    if (!filePath) {
+      await filesRepo.updateStatus(id, "failed");
+      continue;
+    }
+
+    /*
+     * Verify the physical file against the metadata
+     * stored in PostgreSQL.
+     */
+    const {
+      isValid,
+      size,
+      hash,
+    } = await verifyFile(
+      filePath,
+      expected_size,
+      expected_hash,
+    );
+
+    /*
+     * The physical file exists but is incomplete or
+     * corrupted.
+     */
+    if (!isValid) {
+      await fsp.unlink(filePath);
+      await filesRepo.updateStatus(id, "failed");
+      continue;
+    }
+
+    /*
+     * If the valid file is still in temp storage,
+     * finalize the filesystem state first.
+     */
+    if (isTempFile) {
+      await fsp.rename(tempPath, finalPath);
+      filePath = finalPath;
+    }
+
+    /*
+     * The physical file is now in its final location,
+     * so repair the database state.
+     */
+    await filesRepo.completeUpload(
+      id,
+      filePath,
+      size,
+      hash,
+    );
   }
 };
 
@@ -89,29 +200,36 @@ export const reconcileUploadsCompleted = async () => {
     } = upload;
 
     if (!storage_path) {
-      await filesRepo.updateStatus(id, "storage_missing");
+      await filesRepo.updateStatus(
+        id,
+        "storage_missing",
+      );
       continue;
     }
 
     try {
-      const stats = await fs.stat(storage_path);
-
-      const calculatedHash =
-        await calculateFileHash(storage_path);
-
-      const isValid =
-        calculatedHash === expected_hash &&
-        stats.size === expected_size;
+      const {
+        isValid,
+      } = await verifyFile(
+        storage_path,
+        expected_size,
+        expected_hash,
+      );
 
       if (!isValid) {
-        // The file exists, but it is no longer the file
-        // that was originally uploaded.
-        await fs.unlink(storage_path);
-        await filesRepo.updateStatus(id, "storage_missing");
+        await fsp.unlink(storage_path);
+
+        await filesRepo.updateStatus(
+          id,
+          "storage_missing",
+        );
       }
     } catch (error) {
       if (error.code === "ENOENT") {
-        await filesRepo.updateStatus(id, "storage_missing");
+        await filesRepo.updateStatus(
+          id,
+          "storage_missing",
+        );
         continue;
       }
 
