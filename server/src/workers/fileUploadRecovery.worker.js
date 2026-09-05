@@ -1,185 +1,84 @@
-import fs from "fs/promises";
-import fsSync from "fs";
-import crypto from "crypto";
+import { Worker } from "bullmq";
 
-import * as filesRecoveryRepo from "../repositories/fileUploadRecovery.repository.js";
-import * as filesRepo from "../repositories/files.repository.js";
+import {
+  reconcileUploadsPending,
+  reconcileUploadsCompleted,
+} from "../service/fileUploadRecovery.service.js";
 
-
-// ============================================================
-// Pending / Unfinished Upload Recovery
-// ============================================================
-
-export const reconcileUploadsPending = async () => {
-  const uploadsToReconcile =
-    await filesRecoveryRepo.getUnfinishedFiles();
-
-  for (const upload of uploadsToReconcile) {
-    const {
-      id,
-      expected_size,
-      expected_hash,
-      storage_path,
-    } = upload;
-
-    // --------------------------------------------------------
-    // No storage path
-    // --------------------------------------------------------
-
-    if (!storage_path) {
-      await filesRepo.updateStatus(id, "failed");
-      continue;
-    }
-
-    try {
-      // ------------------------------------------------------
-      // Check whether the physical file exists
-      // ------------------------------------------------------
-
-      const stats = await fs.stat(storage_path);
-
-      // ------------------------------------------------------
-      // Calculate hash of the file currently on disk
-      // ------------------------------------------------------
-
-      const hash = crypto.createHash("sha256");
-
-      const readStream = fsSync.createReadStream(storage_path);
-
-      for await (const chunk of readStream) {
-        hash.update(chunk);
-      }
-
-      const calculatedHash = hash.digest("hex");
-
-      // ------------------------------------------------------
-      // Verify file integrity
-      // ------------------------------------------------------
-
-      const sizeMatches =
-        stats.size === expected_size;
-
-      const hashMatches =
-        calculatedHash === expected_hash;
-
-      if (!sizeMatches || !hashMatches) {
-        await fs.unlink(storage_path);
-        await filesRepo.updateStatus(id, "failed");
-
-        continue;
-      }
-
-      // ------------------------------------------------------
-      // File is valid.
-      // Recover the incomplete database record.
-      // ------------------------------------------------------
-
-      await filesRepo.completeUpload(
-        id,
-        storage_path,
-        stats.size,
-        calculatedHash
-      );
-    } catch (error) {
-      // ------------------------------------------------------
-      // File referenced by DB does not exist
-      // ------------------------------------------------------
-
-      if (error.code === "ENOENT") {
-        await filesRepo.updateStatus(id, "failed");
-        continue;
-      }
-
-      // Unexpected error
-      throw error;
-    }
-  }
+const connection = {
+  url: process.env.REDIS_URL,
 };
 
+// ============================================================
+// Pending / Unfinished Upload Recovery Worker
+// ============================================================
+
+const pendingRecoveryWorker = new Worker(
+  "file-upload-recovery-unfinished",
+  async (job) => {
+    console.log("🔥 PENDING RECOVERY JOB RECEIVED");
+    console.log("Job name:", job.name);
+    console.log("Job ID:", job.id);
+
+    await reconcileUploadsPending();
+  },
+  {
+    connection,
+  },
+);
 
 // ============================================================
-// Completed Upload Audit
+// Completed Upload Audit Worker
 // ============================================================
 
-export const reconcileUploadsCompleted = async () => {
-  const uploadsToReconcile =
-    await filesRecoveryRepo.getCompletedFiles();
+const completedRecoveryWorker = new Worker(
+  "file-upload-recovery-completed",
+  async (job) => {
+    console.log("🔥 COMPLETED AUDIT JOB RECEIVED");
+    console.log("Job name:", job.name);
+    console.log("Job ID:", job.id);
 
-  for (const upload of uploadsToReconcile) {
-    const {
-      id,
-      expected_size,
-      expected_hash,
-      storage_path,
-    } = upload;
+    await reconcileUploadsCompleted();
+  },
+  {
+    connection,
+  },
+);
 
-    // --------------------------------------------------------
-    // No storage path
-    // --------------------------------------------------------
+// ============================================================
+// Worker Events
+// ============================================================
 
-    if (!storage_path) {
-      await filesRepo.updateStatus(id, "storage_missing");
-      continue;
-    }
+pendingRecoveryWorker.on("ready", () => {
+  console.log("Pending recovery worker connected to Redis");
+});
 
-    try {
-      // ------------------------------------------------------
-      // Check whether the physical file exists
-      // ------------------------------------------------------
+pendingRecoveryWorker.on("completed", (job) => {
+  console.log("Pending recovery job completed:", job.id);
+});
 
-      const stats = await fs.stat(storage_path);
+pendingRecoveryWorker.on("failed", (job, error) => {
+  console.error(
+    "Pending recovery job failed:",
+    job?.id,
+    error,
+  );
+});
 
-      // ------------------------------------------------------
-      // Recalculate hash from physical file
-      // ------------------------------------------------------
+completedRecoveryWorker.on("ready", () => {
+  console.log("Completed audit worker connected to Redis");
+});
 
-      const hash = crypto.createHash("sha256");
+completedRecoveryWorker.on("completed", (job) => {
+  console.log("Completed audit job completed:", job.id);
+});
 
-      const readStream = fsSync.createReadStream(storage_path);
+completedRecoveryWorker.on("failed", (job, error) => {
+  console.error(
+    "Completed audit job failed:",
+    job?.id,
+    error,
+  );
+});
 
-      for await (const chunk of readStream) {
-        hash.update(chunk);
-      }
-
-      const calculatedHash = hash.digest("hex");
-
-      // ------------------------------------------------------
-      // Verify file integrity
-      // ------------------------------------------------------
-
-      const sizeMatches =
-        stats.size === expected_size;
-
-      const hashMatches =
-        calculatedHash === expected_hash;
-
-      if (!sizeMatches || !hashMatches) {
-        await filesRepo.updateStatus(
-          id,
-          "storage_missing"
-        );
-
-        continue;
-      }
-
-      // File is still valid.
-      // Nothing needs to be changed.
-    } catch (error) {
-      // ------------------------------------------------------
-      // File no longer exists
-      // ------------------------------------------------------
-
-      if (error.code === "ENOENT") {
-        await filesRepo.updateStatus(
-          id,
-          "storage_missing"
-        );
-
-        continue;
-      }
-
-      // Unexpected error
-      throw error;
-    }
-  }
-};
+console.log("File upload recovery workers initialized");

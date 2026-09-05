@@ -8,21 +8,11 @@ import * as filesRecoveryRepo from "../repositories/fileUploadRecovery.repositor
 import * as filesRepo from "../repositories/files.repository.js";
 
 const getTempFilePath = (id) => {
-  return path.join(
-    process.cwd(),
-    "storage",
-    "temp",
-    `${id}.tmp`,
-  );
+  return path.join(process.cwd(), "storage", "temp", `${id}.tmp`);
 };
 
 const getFinalFilePath = (id, extension) => {
-  return path.join(
-    process.cwd(),
-    "storage",
-    "finished",
-    `${id}${extension}`,
-  );
+  return path.join(process.cwd(), "storage", "finished", `${id}${extension}`);
 };
 
 const calculateFileHash = async (filePath) => {
@@ -35,18 +25,14 @@ const calculateFileHash = async (filePath) => {
   return hash.digest("hex");
 };
 
-const verifyFile = async (
-  filePath,
-  expectedSize,
-  expectedHash,
-) => {
+const verifyFile = async (filePath, expectedSize, expectedHash) => {
   const stats = await fsp.stat(filePath);
-
   const calculatedHash = await calculateFileHash(filePath);
 
+  const expectedSizeNumber = Number(expectedSize);
+
   const isValid =
-    calculatedHash === expectedHash &&
-    stats.size === expectedSize;
+    calculatedHash === expectedHash && stats.size === expectedSizeNumber;
 
   return {
     isValid,
@@ -56,17 +42,11 @@ const verifyFile = async (
 };
 
 export const reconcileUploadsPending = async () => {
-  const uploadsToReconcile =
-    await filesRecoveryRepo.getUnfinishedFiles();
+  const uploadsToReconcile = await filesRecoveryRepo.getUnfinishedFiles();
 
   for (const upload of uploadsToReconcile) {
-    const {
-      id,
-      expected_size,
-      expected_hash,
-      storage_path,
-      extension,
-    } = upload;
+    const { id, expected_size, expected_hash, storage_path, extension } =
+      upload;
 
     const tempPath = getTempFilePath(id);
     const finalPath = getFinalFilePath(id, extension);
@@ -82,7 +62,7 @@ export const reconcileUploadsPending = async () => {
      * the path was written to the database before the
      * process was interrupted.
      */
-    
+
     if (storage_path) {
       try {
         await fsp.stat(storage_path);
@@ -145,11 +125,7 @@ export const reconcileUploadsPending = async () => {
      * Verify the physical file against the metadata
      * stored in PostgreSQL.
      */
-    const {
-      isValid,
-      size,
-      hash,
-    } = await verifyFile(
+    const { isValid, size, hash } = await verifyFile(
       filePath,
       expected_size,
       expected_hash,
@@ -159,6 +135,20 @@ export const reconcileUploadsPending = async () => {
      * The physical file exists but is incomplete or
      * corrupted.
      */
+    console.log("========== RECOVERY VERIFICATION ==========");
+    console.log("ID:", id);
+    console.log("File:", filePath);
+
+    console.log("Expected size:", expected_size);
+    console.log("Actual size:", size);
+    console.log("Size match:", size === expected_size);
+
+    console.log("Expected hash:", expected_hash);
+    console.log("Actual hash:", hash);
+    console.log("Hash match:", hash === expected_hash);
+
+    console.log("Valid:", isValid);
+    console.log("============================================");
     if (!isValid) {
       await fsp.unlink(filePath);
       await filesRepo.updateStatus(id, "failed");
@@ -178,39 +168,23 @@ export const reconcileUploadsPending = async () => {
      * The physical file is now in its final location,
      * so repair the database state.
      */
-    await filesRepo.completeUpload(
-      id,
-      filePath,
-      size,
-      hash,
-    );
+    await filesRepo.completeUpload(id, filePath, size, hash);
   }
 };
 
 export const reconcileUploadsCompleted = async () => {
-  const uploadsToReconcile =
-    await filesRecoveryRepo.getCompletedFiles();
+  const uploadsToReconcile = await filesRecoveryRepo.getCompletedFiles();
 
   for (const upload of uploadsToReconcile) {
-    const {
-      id,
-      expected_size,
-      expected_hash,
-      storage_path,
-    } = upload;
+    const { id, expected_size, expected_hash, storage_path } = upload;
 
     if (!storage_path) {
-      await filesRepo.updateStatus(
-        id,
-        "storage_missing",
-      );
+      await filesRepo.updateStatus(id, "storage_missing");
       continue;
     }
 
     try {
-      const {
-        isValid,
-      } = await verifyFile(
+      const { isValid } = await verifyFile(
         storage_path,
         expected_size,
         expected_hash,
@@ -219,17 +193,11 @@ export const reconcileUploadsCompleted = async () => {
       if (!isValid) {
         await fsp.unlink(storage_path);
 
-        await filesRepo.updateStatus(
-          id,
-          "storage_missing",
-        );
+        await filesRepo.updateStatus(id, "storage_missing");
       }
     } catch (error) {
       if (error.code === "ENOENT") {
-        await filesRepo.updateStatus(
-          id,
-          "storage_missing",
-        );
+        await filesRepo.updateStatus(id, "storage_missing");
         continue;
       }
 

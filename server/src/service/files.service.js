@@ -1,10 +1,15 @@
 import fs from "fs";
+
 import path from "path";
+
 import busboy from "busboy";
+
 import { pipeline } from "stream/promises";
+
 import { Transform } from "stream";
+
 import crypto from "crypto";
-import { setTimeout } from "timers/promises";
+
 import * as filesRepo from "../repositories/files.repository.js";
 
 export const uploadFile = async (req) => {
@@ -13,9 +18,11 @@ export const uploadFile = async (req) => {
   });
 
   const idempotencyKey = req.headers["idempotency-key"];
+
   const expectedSize = req.headers["expected-size"]
     ? parseInt(req.headers["expected-size"], 10)
     : null;
+
   const expectedHash = req.headers["expected-hash"]
     ? req.headers["expected-hash"].trim().toLowerCase()
     : null;
@@ -28,14 +35,17 @@ export const uploadFile = async (req) => {
         const fileName = info.filename;
         const mimeType = info.mimeType;
         const hash = crypto.createHash("sha256");
-        const extension = path.extname(fileName).toLowerCase(); // Get the file extension without the dot
+
+        const extension = path.extname(fileName).toLowerCase();
 
         if (!idempotencyKey) {
           throw new Error("Idempotency key is required");
         }
 
         if (expectedSize === null || expectedHash === null) {
-          throw new Error("expectedSize and expectedHash are required");
+          throw new Error(
+            "expectedSize and expectedHash are required",
+          );
         }
 
         if (!Number.isSafeInteger(expectedSize) || expectedSize < 0) {
@@ -52,7 +62,8 @@ export const uploadFile = async (req) => {
         );
 
         if (!upload) {
-          const existingUpload = await filesRepo.checkExistence(idempotencyKey);
+          const existingUpload =
+            await filesRepo.checkExistence(idempotencyKey);
 
           if (!existingUpload) {
             throw new Error(
@@ -68,11 +79,18 @@ export const uploadFile = async (req) => {
           return;
         }
 
-        const destinationPath = path.join(
+        const tempPath = path.join(
           process.cwd(),
           "storage",
           "temp",
           `${upload.id}.tmp`,
+        );
+
+        const finalPath = path.join(
+          process.cwd(),
+          "storage",
+          "finished",
+          `${upload.id}${extension}`,
         );
 
         let size = 0;
@@ -81,6 +99,7 @@ export const uploadFile = async (req) => {
           transform(chunk, encoding, callback) {
             size += chunk.length;
             hash.update(chunk);
+            console.log(`Received ${size} bytes of data`);
             callback(null, chunk);
           },
         });
@@ -88,32 +107,29 @@ export const uploadFile = async (req) => {
         await pipeline(
           fileStream,
           counter,
-          fs.createWriteStream(destinationPath),
+          fs.createWriteStream(tempPath),
         );
 
         const actualHash = hash.digest("hex");
 
-        if (actualHash !== expectedHash || size !== expectedSize) {
-          await fs.promises.unlink(destinationPath);
+        if (
+          actualHash !== expectedHash ||
+          size !== expectedSize
+        ) {
+          await fs.promises.unlink(tempPath);
 
-          await filesRepo.updateStatus(upload.id, "failed");
+          await filesRepo.updateStatus(
+            upload.id,
+            "failed",
+          );
 
           throw new Error("File verification failed");
         }
-        
 
         await fs.promises.rename(
-          `storage/temp/${upload.id}.tmp`,
-          `storage/finished/${upload.id}.${extension}`,
+          tempPath,
+          finalPath,
         );
-
-        const finalPath = path.join(
-          process.cwd(),
-          "storage",
-          "finished",
-          `${upload.id}.${extension}`,
-        );
-
 
         await filesRepo.completeUpload(
           upload.id,
@@ -125,7 +141,7 @@ export const uploadFile = async (req) => {
         resolve({
           success: true,
           path: finalPath,
-          size: size,
+          size,
         });
       } catch (error) {
         reject(error);
