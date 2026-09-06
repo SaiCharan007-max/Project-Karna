@@ -1,6 +1,7 @@
 import express from 'express';
 import healthRoutes from './routes/health.routes.js';
 import fileRoutes from './routes/files.routes.js';
+import fileRetrievalRoutes from './routes/fileRetrieval.routes.js';
 // import cors from 'cors';
 // import bodyParser from 'body-parser';
 // import routes from './routes/index.js';
@@ -8,6 +9,7 @@ import fileRoutes from './routes/files.routes.js';
 const app = express();
 app.use("/", healthRoutes);
 app.use("/files", fileRoutes);
+app.use("/files", fileRetrievalRoutes);
 
 // Uncomment the following lines if you want to enable CORS and body parsing
 
