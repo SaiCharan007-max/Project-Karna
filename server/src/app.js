@@ -2,20 +2,22 @@ import express from 'express';
 import healthRoutes from './routes/health.routes.js';
 import fileRoutes from './routes/files.routes.js';
 import fileRetrievalRoutes from './routes/fileRetrieval.routes.js';
-// import cors from 'cors';
-// import bodyParser from 'body-parser';
-// import routes from './routes/index.js';
+import chunksRoutes from './routes/chunks.routes.js';   
+import cors from 'cors';
+import bodyParser from 'body-parser';
+import errorHandler from './middleware/errorHandler.js';
 
 const app = express();
+app.use(cors());
+app.use(bodyParser.json());
+
 app.use("/", healthRoutes);
 app.use("/files", fileRoutes);
 app.use("/files", fileRetrievalRoutes);
+app.use("/files", chunksRoutes); // Add the chunks routes to the app
 
-// Uncomment the following lines if you want to enable CORS and body parsing
 
-// app.use(cors());
-// app.use(bodyParser.json());
-// app.use('/api', routes);
+app.use(errorHandler);
 
 
 export default app;
